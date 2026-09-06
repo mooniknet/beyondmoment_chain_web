@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>BeyondMoment Chain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
 <style>
   :root {
     --bg: #05070f; --bg-soft: #0d1230; --card: #11163a; --border: rgba(160,176,235,0.18);
@@ -11,12 +14,19 @@
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    margin: 0; min-height: 100vh; color: var(--text);
+    background:
+      radial-gradient(120% 90% at 50% 8%, #1a2350 0%, #0d1230 38%, #05070f 78%);
+    background-attachment: fixed;
     font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
     display: flex; justify-content: center; padding: 40px 20px;
   }
   main { width: 100%; max-width: 560px; }
-  h1 { font-weight: 400; font-size: 28px; margin-bottom: 4px; }
+  h1 {
+    font-family: "Cormorant Garamond", serif; font-weight: 400; font-size: 40px;
+    letter-spacing: -0.01em; margin-bottom: 6px;
+  }
+  h1 .accent-word { color: var(--accent); font-style: italic; }
   .sub { color: var(--text-dim); font-size: 14px; margin-bottom: 28px; }
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 16px;
@@ -51,30 +61,48 @@
   .empty { color: var(--text-dim); font-size: 14px; }
   a { color: var(--accent); }
 
-  .constellation-wrap { position: relative; margin: 0 -6px; overflow: hidden; }
+  #moments-section {
+    background:
+      linear-gradient(180deg, #0a1030 0%, #141a3d 44%, #3a2a4e 74%, #52394a 100%);
+    border-color: rgba(180, 196, 255, 0.16);
+  }
+  #moments-section > strong {
+    font-family: "Cormorant Garamond", serif; font-size: 20px; font-weight: 500;
+    letter-spacing: 0.01em; color: #f4f6ff;
+  }
+  .constellation-wrap { position: relative; margin: 4px -6px 0; overflow: hidden; border-radius: 12px; }
   .constellation-wrap svg { display: block; width: 100%; height: auto; }
-  .star-node { cursor: pointer; }
-  .star-node .star-halo { transition: r 0.15s ease, opacity 0.15s ease; }
-  .star-node:hover .star-halo { r: 17; opacity: 0.32; }
+  .ambient-star { animation: ambient-twinkle 4s ease-in-out infinite; }
+  @keyframes ambient-twinkle { 0%, 100% { opacity: 0.1; } 50% { opacity: 0.75; } }
+  .star-node { cursor: pointer; transform-origin: center; transform-box: fill-box; transition: transform 0.2s ease; }
+  .star-node:hover { transform: scale(1.18); }
+  .star-halo { animation: star-twinkle 3.2s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+  @keyframes star-twinkle { 0%, 100% { opacity: 0.22; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.15); } }
+  .constellation-path { filter: url(#line-glow); }
   .star-label-id { font: 10px "Consolas", monospace; }
-  .star-label-date { font: 9px "Consolas", monospace; fill: var(--text-dim); }
-  .star-label-text { font: 12px "Segoe UI", sans-serif; fill: var(--text); }
+  .star-label-date { font: 9px "Consolas", monospace; fill: #aab2d8; }
+  .star-label-text { font: 13px "Cormorant Garamond", serif; fill: #f4f6ff; }
 
   .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,0.6);
     display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 20;
   }
   .modal-card {
-    background: var(--bg-soft); border: 1px solid var(--border); border-radius: 16px;
+    background: linear-gradient(160deg, #1a2350 0%, #141a3d 55%, #2a2044 100%);
+    border: 1px solid rgba(180, 196, 255, 0.2); border-radius: 16px;
     padding: 24px; max-width: 420px; width: 100%;
+    box-shadow: 0 30px 70px rgba(0,0,0,0.45);
   }
-  .modal-card .moment-text { font-size: 16px; line-height: 1.6; margin-bottom: 14px; white-space: pre-wrap; }
+  .modal-card .moment-text {
+    font-family: "Cormorant Garamond", serif; font-size: 20px; line-height: 1.6;
+    margin-bottom: 14px; white-space: pre-wrap; color: #f8f9ff;
+  }
   .modal-close { background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 999px; padding: 8px 18px; margin-top: 14px; }
 </style>
 </head>
 <body>
 <main>
-  <h1>BeyondMoment <span style="color:var(--accent)">Chain</span></h1>
+  <h1>Beyond<span class="accent-word">Moment</span> Chain</h1>
   <p class="sub">순간을 이더리움 블록체인에 영구히 기록합니다 (Sepolia 테스트넷 프로토타입)</p>
 
   <section id="auth-section" class="card">
@@ -217,6 +245,32 @@ function layoutMoments(moments) {
   return { items, laneCount: nextLane };
 }
 
+// A small deterministic PRNG so the ambient starfield doesn't jump around
+// on every reload/refresh -- seeded by moment count so it still varies
+// as the constellation grows.
+function seededRandom(seed) {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return function next() {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+function buildAmbientStars(width, height, count) {
+  const rand = seededRandom(width * 7 + height * 13 + count * 101 + 1);
+  let svg = '';
+  for (let i = 0; i < count; i++) {
+    const cx = (rand() * width).toFixed(1);
+    const cy = (rand() * height).toFixed(1);
+    const r = (0.4 + rand() * 1.1).toFixed(2);
+    const delay = (rand() * 4).toFixed(2);
+    const dur = (3 + rand() * 3).toFixed(2);
+    svg += `<circle class="ambient-star" cx="${cx}" cy="${cy}" r="${r}" fill="#fff" style="animation-delay:${delay}s; animation-duration:${dur}s;" />`;
+  }
+  return svg;
+}
+
 function buildConstellationSvg(moments) {
   const { items, laneCount } = layoutMoments(moments);
   const compact = laneCount > 1;
@@ -241,7 +295,7 @@ function buildConstellationSvg(moments) {
       const child = posOf.get(String(item.m.id));
       const parent = posOf.get(item.parentKey);
       const midY = (parent.y + child.y) / 2;
-      return `<path d="M ${parent.x} ${parent.y} C ${parent.x} ${midY}, ${child.x} ${midY}, ${child.x} ${child.y}" fill="none" stroke="rgba(226,214,255,.35)" stroke-width="1" stroke-dasharray="4 6" />`;
+      return `<path class="constellation-path" d="M ${parent.x} ${parent.y} C ${parent.x} ${midY}, ${child.x} ${midY}, ${child.x} ${child.y}" fill="none" stroke="rgba(226,214,255,.5)" stroke-width="1" stroke-dasharray="4 6" />`;
     })
     .join('');
 
@@ -250,10 +304,11 @@ function buildConstellationSvg(moments) {
       const m = item.m;
       const p = posOf.get(String(m.id));
       const color = STAR_COLORS[i % STAR_COLORS.length];
+      const delay = (i * 0.35).toFixed(2);
       if (compact) {
         return `
           <g class="star-node" data-id="${m.id}">
-            <circle class="star-halo" cx="${p.x}" cy="${p.y}" r="12" fill="${color}" opacity="0.18" />
+            <circle class="star-halo" cx="${p.x}" cy="${p.y}" r="12" fill="${color}" opacity="0.3" filter="url(#star-glow)" style="animation-delay:${delay}s;" />
             <circle cx="${p.x}" cy="${p.y}" r="5" fill="${color}" />
             <text class="star-label-id" x="${p.x}" y="${p.y + 22}" fill="${color}" text-anchor="middle">#${m.id}</text>
           </g>
@@ -265,7 +320,7 @@ function buildConstellationSvg(moments) {
       const preview = m.text.length > 20 ? m.text.slice(0, 20) + '…' : m.text;
       return `
         <g class="star-node" data-id="${m.id}">
-          <circle class="star-halo" cx="${p.x}" cy="${p.y}" r="13" fill="${color}" opacity="0.18" />
+          <circle class="star-halo" cx="${p.x}" cy="${p.y}" r="13" fill="${color}" opacity="0.3" filter="url(#star-glow)" style="animation-delay:${delay}s;" />
           <circle cx="${p.x}" cy="${p.y}" r="5" fill="${color}" />
           <text class="star-label-id" x="${labelX}" y="${p.y - 14}" fill="${color}">#${m.id}</text>
           <text class="star-label-date" x="${labelX}" y="${p.y - 2}">${dateStr}</text>
@@ -275,8 +330,19 @@ function buildConstellationSvg(moments) {
     })
     .join('');
 
+  const ambientSvg = buildAmbientStars(width, height, Math.min(60, Math.max(24, items.length * 6)));
+
   return `
     <svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="line-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="0.6" />
+        </filter>
+        <filter id="star-glow" x="-150%" y="-150%" width="400%" height="400%">
+          <feGaussianBlur stdDeviation="3.2" />
+        </filter>
+      </defs>
+      ${ambientSvg}
       ${linksSvg}
       ${starsSvg}
     </svg>
