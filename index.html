@@ -23,7 +23,7 @@
     padding: 22px; margin-bottom: 20px;
   }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  input, textarea {
+  input, textarea, select {
     width: 100%; border-radius: 12px; border: 1px solid var(--border);
     background: var(--bg-soft); color: var(--text); padding: 12px 14px; font-size: 14px;
     font-family: inherit;
@@ -50,6 +50,26 @@
   .moment-meta a { color: var(--text-dim); }
   .empty { color: var(--text-dim); font-size: 14px; }
   a { color: var(--accent); }
+
+  .constellation-wrap { position: relative; margin: 0 -6px; overflow: hidden; }
+  .constellation-wrap svg { display: block; width: 100%; height: auto; }
+  .star-node { cursor: pointer; }
+  .star-node .star-halo { transition: r 0.15s ease, opacity 0.15s ease; }
+  .star-node:hover .star-halo { r: 17; opacity: 0.32; }
+  .star-label-id { font: 10px "Consolas", monospace; }
+  .star-label-date { font: 9px "Consolas", monospace; fill: var(--text-dim); }
+  .star-label-text { font: 12px "Segoe UI", sans-serif; fill: var(--text); }
+
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 20;
+  }
+  .modal-card {
+    background: var(--bg-soft); border: 1px solid var(--border); border-radius: 16px;
+    padding: 24px; max-width: 420px; width: 100%;
+  }
+  .modal-card .moment-text { font-size: 16px; line-height: 1.6; margin-bottom: 14px; white-space: pre-wrap; }
+  .modal-close { background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 999px; padding: 8px 18px; margin-top: 14px; }
 </style>
 </head>
 <body>
@@ -78,6 +98,10 @@
   <section id="record-section" class="card" style="display:none;">
     <textarea id="moment-text" maxlength="1000" placeholder="지금 이 순간을 글로 남겨보세요..."></textarea>
     <div class="counter" id="char-counter">0 / 500</div>
+    <label for="parent-select">어디에 이어질까요?</label>
+    <select id="parent-select">
+      <option value="">🌱 새로운 이야기로 시작</option>
+    </select>
     <button id="record-btn" disabled style="width:100%; margin-top:10px;">순간 기록하기</button>
     <div id="record-status" class="status"></div>
   </section>
@@ -88,8 +112,20 @@
       <button class="ghost" id="refresh-btn">새로고침</button>
     </div>
     <div id="moments-list" class="empty">불러오는 중...</div>
+    <div class="moment-meta" style="margin-top:14px;">
+      <a id="contract-link" href="#" target="_blank" rel="noopener">전체 기록을 블록체인에서 직접 확인하기 →</a>
+    </div>
   </section>
 </main>
+
+<div id="star-modal-backdrop" class="modal-backdrop" style="display:none;">
+  <div class="modal-card">
+    <div id="star-modal-date" class="moment-meta" style="margin-bottom:8px;"></div>
+    <div id="star-modal-text" class="moment-text"></div>
+    <div id="star-modal-link" class="moment-meta"></div>
+    <button class="modal-close" id="star-modal-close">닫기</button>
+  </div>
+</div>
 
 <script src="config.js"></script>
 <script type="module">
@@ -117,6 +153,7 @@ const logoutBtn = document.getElementById('logout-btn');
 const recordSection = document.getElementById('record-section');
 const momentsSection = document.getElementById('moments-section');
 const momentText = document.getElementById('moment-text');
+const parentSelect = document.getElementById('parent-select');
 const charCounter = document.getElementById('char-counter');
 const recordBtn = document.getElementById('record-btn');
 const recordStatus = document.getElementById('record-status');
@@ -125,6 +162,7 @@ const refreshBtn = document.getElementById('refresh-btn');
 
 abi = await fetch('abi.json').then((r) => r.json());
 readContract = new ethers.Contract(cfg.contractAddress, abi, readProvider);
+document.getElementById('contract-link').href = `${cfg.blockExplorerUrl}/address/${cfg.contractAddress}`;
 
 function usernameEmail(name) {
   return `${name.trim().toLowerCase()}@users.beyondmoment.com`;
@@ -148,6 +186,133 @@ function escapeHtml(s) {
   div.textContent = s;
   return div.innerHTML;
 }
+
+const STAR_COLORS = ['#ffe3b4', '#8fd6e8', '#f2a7c3', '#c7f2a7', '#c7b4ff'];
+let currentMoments = [];
+
+// Moments form a forest (each has an optional parentId). Lay them out top to
+// bottom in recording order; a moment continues its parent's lane if it's the
+// parent's first child seen so far, otherwise it branches into a fresh lane
+// -- so a moment with multiple children visibly forks the constellation.
+function layoutMoments(moments) {
+  const laneOfId = new Map();
+  const childCountSeen = new Map();
+  let nextLane = 0;
+
+  const items = moments.map((m, i) => {
+    const parentKey = String(m.parentId);
+    const parentInSet = laneOfId.has(parentKey);
+    let lane;
+    if (!parentInSet) {
+      lane = nextLane++;
+    } else {
+      const seen = childCountSeen.get(parentKey) || 0;
+      childCountSeen.set(parentKey, seen + 1);
+      lane = seen === 0 ? laneOfId.get(parentKey) : nextLane++;
+    }
+    laneOfId.set(String(m.id), lane);
+    return { m, lane, parentKey, parentInSet, index: i };
+  });
+
+  return { items, laneCount: nextLane };
+}
+
+function buildConstellationSvg(moments) {
+  const { items, laneCount } = layoutMoments(moments);
+  const compact = laneCount > 1;
+  const spacing = 110;
+  const topPad = 34;
+  const bottomPad = 34;
+  const laneWidth = 60;
+  const leftPad = 40;
+  const width = compact ? leftPad * 2 + laneCount * laneWidth : 340;
+  const height = topPad + bottomPad + spacing * Math.max(items.length - 1, 0);
+
+  const posOf = new Map();
+  items.forEach((item) => {
+    const x = compact ? leftPad + item.lane * laneWidth : 150 + Math.sin(item.index * 0.9) * 26;
+    const y = topPad + item.index * spacing;
+    posOf.set(String(item.m.id), { x, y });
+  });
+
+  const linksSvg = items
+    .filter((item) => item.parentInSet)
+    .map((item) => {
+      const child = posOf.get(String(item.m.id));
+      const parent = posOf.get(item.parentKey);
+      const midY = (parent.y + child.y) / 2;
+      return `<path d="M ${parent.x} ${parent.y} C ${parent.x} ${midY}, ${child.x} ${midY}, ${child.x} ${child.y}" fill="none" stroke="rgba(226,214,255,.35)" stroke-width="1" stroke-dasharray="4 6" />`;
+    })
+    .join('');
+
+  const starsSvg = items
+    .map((item, i) => {
+      const m = item.m;
+      const p = posOf.get(String(m.id));
+      const color = STAR_COLORS[i % STAR_COLORS.length];
+      if (compact) {
+        return `
+          <g class="star-node" data-id="${m.id}">
+            <circle class="star-halo" cx="${p.x}" cy="${p.y}" r="12" fill="${color}" opacity="0.18" />
+            <circle cx="${p.x}" cy="${p.y}" r="5" fill="${color}" />
+            <text class="star-label-id" x="${p.x}" y="${p.y + 22}" fill="${color}" text-anchor="middle">#${m.id}</text>
+          </g>
+        `;
+      }
+      const date = new Date(Number(m.timestamp) * 1000);
+      const dateStr = date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'short', day: 'numeric' });
+      const labelX = p.x + 22;
+      const preview = m.text.length > 20 ? m.text.slice(0, 20) + '…' : m.text;
+      return `
+        <g class="star-node" data-id="${m.id}">
+          <circle class="star-halo" cx="${p.x}" cy="${p.y}" r="13" fill="${color}" opacity="0.18" />
+          <circle cx="${p.x}" cy="${p.y}" r="5" fill="${color}" />
+          <text class="star-label-id" x="${labelX}" y="${p.y - 14}" fill="${color}">#${m.id}</text>
+          <text class="star-label-date" x="${labelX}" y="${p.y - 2}">${dateStr}</text>
+          <text class="star-label-text" x="${labelX}" y="${p.y + 14}">${escapeHtml(preview)}</text>
+        </g>
+      `;
+    })
+    .join('');
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      ${linksSvg}
+      ${starsSvg}
+    </svg>
+  `;
+}
+
+function openStarModal(id) {
+  const m = currentMoments.find((x) => String(x.id) === String(id));
+  if (!m) return;
+  const date = new Date(Number(m.timestamp) * 1000).toLocaleString('ko-KR');
+  document.getElementById('star-modal-date').textContent = `#${m.id} · ${date}`;
+  document.getElementById('star-modal-text').textContent = m.text;
+  const linkEl = document.getElementById('star-modal-link');
+  linkEl.textContent = '트랜잭션 조회 중...';
+  document.getElementById('star-modal-backdrop').style.display = 'flex';
+
+  readContract
+    .queryFilter(readContract.filters.MomentRecorded(m.id), cfg.deployBlock)
+    .then((events) => {
+      if (events[0]) {
+        linkEl.innerHTML = `<a href="${cfg.blockExplorerUrl}/tx/${events[0].transactionHash}" target="_blank" rel="noopener">Etherscan에서 확인 →</a>`;
+      } else {
+        linkEl.textContent = '';
+      }
+    })
+    .catch(() => {
+      linkEl.textContent = '';
+    });
+}
+
+document.getElementById('star-modal-close').addEventListener('click', () => {
+  document.getElementById('star-modal-backdrop').style.display = 'none';
+});
+document.getElementById('star-modal-backdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'star-modal-backdrop') e.currentTarget.style.display = 'none';
+});
 
 function renderSignedIn() {
   const username = session.user.user_metadata?.username ?? session.user.email;
@@ -215,18 +380,23 @@ recordBtn.addEventListener('click', async () => {
   recordBtn.disabled = true;
   setStatus(recordStatus, '기록 요청 중... (몇 초 정도 걸릴 수 있어요)', '');
   try {
+    const parentId = parentSelect.value || undefined;
     const res = await fetch(cfg.edgeFunctionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, parentId }),
     });
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || '기록에 실패했어요.');
-    setStatus(recordStatus, '순간이 영구히 기록되었습니다.', 'success');
+    recordStatus.className = 'status success';
+    recordStatus.innerHTML =
+      '순간이 영구히 기록되었습니다. ' +
+      `<a href="${cfg.blockExplorerUrl}/tx/${result.txHash}" target="_blank" rel="noopener">Etherscan에서 확인</a>`;
     momentText.value = '';
+    parentSelect.value = '';
     updateCounter();
     loadMoments();
   } catch (err) {
@@ -237,6 +407,19 @@ recordBtn.addEventListener('click', async () => {
   }
 });
 
+function populateParentSelect(moments) {
+  const options = ['<option value="">🌱 새로운 이야기로 시작</option>'];
+  moments
+    .slice()
+    .reverse()
+    .forEach((m) => {
+      const date = new Date(Number(m.timestamp) * 1000).toLocaleDateString('ko-KR');
+      const preview = m.text.length > 18 ? m.text.slice(0, 18) + '…' : m.text;
+      options.push(`<option value="${m.id}">#${m.id} · ${date} · ${escapeHtml(preview)}</option>`);
+    });
+  parentSelect.innerHTML = options.join('');
+}
+
 async function loadMoments() {
   if (!session) return;
   const username = (session.user.user_metadata?.username ?? '').toLowerCase();
@@ -246,28 +429,31 @@ async function loadMoments() {
     const ids = await readContract.getMomentIdsByUserId(username);
     if (ids.length === 0) {
       momentsList.textContent = '아직 기록된 순간이 없어요.';
+      currentMoments = [];
+      populateParentSelect([]);
       return;
     }
     const moments = await Promise.all(
       ids.map((id) =>
-        readContract.getMoment(id).then(([author, userId, timestamp, text]) => ({ id, author, userId, timestamp, text }))
+        readContract
+          .getMoment(id)
+          .then(([author, userId, timestamp, text, parentId]) => ({ id, author, userId, timestamp, text, parentId }))
       )
     );
-    momentsList.className = '';
-    momentsList.innerHTML = moments
-      .slice()
-      .reverse()
-      .map((m) => {
-        const date = new Date(Number(m.timestamp) * 1000).toLocaleString('ko-KR');
-        return `<div class="moment"><div class="moment-text">${escapeHtml(m.text)}</div><div class="moment-meta">#${m.id} · ${date}</div></div>`;
-      })
-      .join('');
+    currentMoments = moments;
+    momentsList.className = 'constellation-wrap';
+    momentsList.innerHTML = buildConstellationSvg(moments);
+    populateParentSelect(moments);
   } catch (err) {
     momentsList.textContent = '불러오지 못했습니다: ' + (err.message || err);
   }
 }
 
 refreshBtn.addEventListener('click', loadMoments);
+momentsList.addEventListener('click', (e) => {
+  const node = e.target.closest('.star-node');
+  if (node) openStarModal(node.dataset.id);
+});
 
 const { data: existing } = await supabase.auth.getSession();
 if (existing.session) {

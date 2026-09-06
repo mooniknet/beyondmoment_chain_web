@@ -34,6 +34,28 @@
     "inputs": [
       {
         "internalType": "uint256",
+        "name": "parentId",
+        "type": "uint256"
+      }
+    ],
+    "name": "NotYourMoment",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "parentId",
+        "type": "uint256"
+      }
+    ],
+    "name": "ParentNotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
         "name": "length",
         "type": "uint256"
       },
@@ -78,6 +100,12 @@
         "internalType": "string",
         "name": "text",
         "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "parentId",
+        "type": "uint256"
       }
     ],
     "name": "MomentRecorded",
@@ -116,6 +144,38 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "NO_PARENT",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      }
+    ],
+    "name": "getChildren",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -144,6 +204,11 @@
         "internalType": "string",
         "name": "text",
         "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "parentId",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -244,6 +309,11 @@
         "internalType": "string",
         "name": "text",
         "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "parentId",
+        "type": "uint256"
       }
     ],
     "name": "recordMoment",
@@ -268,6 +338,11 @@
         "internalType": "string",
         "name": "text",
         "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "parentId",
+        "type": "uint256"
       }
     ],
     "name": "recordMomentFor",
