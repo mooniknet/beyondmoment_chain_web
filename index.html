@@ -23,17 +23,21 @@
     padding: 22px; margin-bottom: 20px;
   }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  input, textarea {
+    width: 100%; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--bg-soft); color: var(--text); padding: 12px 14px; font-size: 14px;
+    font-family: inherit;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  label { display: block; font-size: 12px; color: var(--text-dim); margin: 12px 0 6px; }
+  label:first-child { margin-top: 0; }
   button {
     background: linear-gradient(135deg, #ffe3b4, #ffc98a); color: #1a1206; border: none;
     border-radius: 999px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   button:disabled { opacity: 0.5; cursor: default; }
   button.ghost { background: rgba(255,255,255,0.06); color: var(--text); border: 1px solid var(--border); }
-  textarea {
-    width: 100%; min-height: 90px; border-radius: 12px; border: 1px solid var(--border);
-    background: var(--bg-soft); color: var(--text); padding: 12px 14px; font-size: 14px;
-    font-family: inherit; resize: vertical;
-  }
+  button.link { background: none; border: none; color: var(--accent); text-decoration: underline; padding: 0; font-size: 13px; }
   .counter { font-size: 12px; color: var(--text-dim); text-align: right; margin-top: 4px; }
   .counter.over { color: #ff9a8f; }
   .status { font-size: 13px; color: var(--text-dim); margin-top: 10px; min-height: 18px; }
@@ -43,6 +47,7 @@
   .moment:first-child { border-top: none; padding-top: 0; }
   .moment-text { font-size: 15px; margin-bottom: 4px; white-space: pre-wrap; }
   .moment-meta { font-size: 12px; color: var(--text-dim); }
+  .moment-meta a { color: var(--text-dim); }
   .empty { color: var(--text-dim); font-size: 14px; }
   a { color: var(--accent); }
 </style>
@@ -52,188 +57,225 @@
   <h1>BeyondMoment <span style="color:var(--accent)">Chain</span></h1>
   <p class="sub">순간을 이더리움 블록체인에 영구히 기록합니다 (Sepolia 테스트넷 프로토타입)</p>
 
-  <div class="card">
-    <div class="row">
-      <span id="account-label">지갑이 연결되지 않았습니다</span>
-      <button id="connect-btn">지갑 연결</button>
+  <section id="auth-section" class="card">
+    <div id="auth-form">
+      <label for="username">아이디</label>
+      <input id="username" placeholder="영문/숫자 3~24자" maxlength="24" />
+      <label for="password">비밀번호</label>
+      <input id="password" type="password" placeholder="6자 이상" />
+      <button id="auth-submit" style="width:100%; margin-top:16px;">로그인</button>
+      <div style="text-align:center; margin-top:12px; font-size:13px; color:var(--text-dim);">
+        계정이 없나요? <button class="link" id="mode-toggle">회원가입</button>
+      </div>
+      <div id="auth-status" class="status error"></div>
     </div>
-    <div id="network-warning" class="status error" style="display:none;"></div>
-  </div>
+    <div id="account-row" class="row" style="display:none;">
+      <span id="account-label"></span>
+      <button class="ghost" id="logout-btn">로그아웃</button>
+    </div>
+  </section>
 
-  <div class="card">
+  <section id="record-section" class="card" style="display:none;">
     <textarea id="moment-text" maxlength="1000" placeholder="지금 이 순간을 글로 남겨보세요..."></textarea>
     <div class="counter" id="char-counter">0 / 500</div>
     <button id="record-btn" disabled style="width:100%; margin-top:10px;">순간 기록하기</button>
     <div id="record-status" class="status"></div>
-  </div>
+  </section>
 
-  <div class="card">
+  <section id="moments-section" class="card" style="display:none;">
     <div class="row" style="margin-bottom:12px;">
       <strong>내 순간들</strong>
       <button class="ghost" id="refresh-btn">새로고침</button>
     </div>
-    <div id="moments-list" class="empty">지갑을 연결하면 기록된 순간이 여기 보여요.</div>
-  </div>
+    <div id="moments-list" class="empty">불러오는 중...</div>
+  </section>
 </main>
 
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
-<script src="config.js"></script>
-<script>
-(async function () {
-  const cfg = window.BEYOND_MOMENTS_CONFIG;
-  const MAX_LEN = 500;
-  let abi = null;
-  let provider = null;
-  let signer = null;
-  let contract = null;
-  let currentAddress = null;
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { ethers } from 'https://esm.sh/ethers@6.13.4';
 
-  const connectBtn = document.getElementById('connect-btn');
-  const accountLabel = document.getElementById('account-label');
-  const networkWarning = document.getElementById('network-warning');
-  const momentText = document.getElementById('moment-text');
-  const charCounter = document.getElementById('char-counter');
-  const recordBtn = document.getElementById('record-btn');
-  const recordStatus = document.getElementById('record-status');
-  const momentsList = document.getElementById('moments-list');
-  const refreshBtn = document.getElementById('refresh-btn');
+const cfg = window.BEYOND_MOMENTS_CONFIG;
+const MAX_LEN = 500;
+const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+const readProvider = new ethers.JsonRpcProvider(cfg.rpcUrl);
+let abi = null;
+let readContract = null;
+let session = null;
+let mode = 'signin';
 
-  abi = await fetch('abi.json').then((r) => r.json());
+const authForm = document.getElementById('auth-form');
+const accountRow = document.getElementById('account-row');
+const accountLabel = document.getElementById('account-label');
+const usernameInput = document.getElementById('username');
+const passwordInput = document.getElementById('password');
+const authSubmit = document.getElementById('auth-submit');
+const modeToggle = document.getElementById('mode-toggle');
+const authStatus = document.getElementById('auth-status');
+const logoutBtn = document.getElementById('logout-btn');
+const recordSection = document.getElementById('record-section');
+const momentsSection = document.getElementById('moments-section');
+const momentText = document.getElementById('moment-text');
+const charCounter = document.getElementById('char-counter');
+const recordBtn = document.getElementById('record-btn');
+const recordStatus = document.getElementById('record-status');
+const momentsList = document.getElementById('moments-list');
+const refreshBtn = document.getElementById('refresh-btn');
 
-  function updateCounter() {
-    const len = new TextEncoder().encode(momentText.value).length;
-    charCounter.textContent = `${len} / ${MAX_LEN}`;
-    charCounter.classList.toggle('over', len > MAX_LEN);
-    recordBtn.disabled = !currentAddress || len === 0 || len > MAX_LEN;
+abi = await fetch('abi.json').then((r) => r.json());
+readContract = new ethers.Contract(cfg.contractAddress, abi, readProvider);
+
+function usernameEmail(name) {
+  return `${name.trim().toLowerCase()}@users.beyondmoment.com`;
+}
+
+function setStatus(el, text, kind) {
+  el.textContent = text;
+  el.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+function updateCounter() {
+  const len = new TextEncoder().encode(momentText.value).length;
+  charCounter.textContent = `${len} / ${MAX_LEN}`;
+  charCounter.classList.toggle('over', len > MAX_LEN);
+  recordBtn.disabled = len === 0 || len > MAX_LEN;
+}
+momentText.addEventListener('input', updateCounter);
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+function renderSignedIn() {
+  const username = session.user.user_metadata?.username ?? session.user.email;
+  authForm.style.display = 'none';
+  accountRow.style.display = 'flex';
+  accountLabel.textContent = username;
+  recordSection.style.display = 'block';
+  momentsSection.style.display = 'block';
+  loadMoments();
+}
+
+function renderSignedOut() {
+  authForm.style.display = 'block';
+  accountRow.style.display = 'none';
+  recordSection.style.display = 'none';
+  momentsSection.style.display = 'none';
+}
+
+modeToggle.addEventListener('click', () => {
+  mode = mode === 'signin' ? 'signup' : 'signin';
+  authSubmit.textContent = mode === 'signin' ? '로그인' : '회원가입';
+  modeToggle.textContent = mode === 'signin' ? '회원가입' : '로그인';
+  authStatus.textContent = '';
+});
+
+authSubmit.addEventListener('click', async () => {
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+  if (!/^[a-zA-Z0-9._-]{3,24}$/.test(username)) {
+    setStatus(authStatus, '아이디는 3~24자의 영문, 숫자, ., -, _ 만 사용할 수 있어요.', 'error');
+    return;
   }
-  momentText.addEventListener('input', updateCounter);
-
-  function setStatus(el, text, kind) {
-    el.textContent = text;
-    el.className = 'status' + (kind ? ' ' + kind : '');
+  if (password.length < 6) {
+    setStatus(authStatus, '비밀번호는 6자 이상이어야 해요.', 'error');
+    return;
   }
-
-  async function ensureNetwork() {
-    if (!cfg.contractAddress) {
-      networkWarning.style.display = 'block';
-      setStatus(networkWarning, '아직 컨트랙트가 배포되지 않았습니다. web/config.js에 contractAddress를 채워주세요.', 'error');
-      return false;
-    }
-    const network = await provider.getNetwork();
-    if ('0x' + network.chainId.toString(16) !== cfg.chainIdHex) {
-      try {
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: cfg.chainIdHex }],
-        });
-      } catch (switchError) {
-        if (switchError.code === 4902) {
-          await window.ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [{
-              chainId: cfg.chainIdHex,
-              chainName: cfg.chainName,
-              rpcUrls: cfg.rpcUrls,
-              blockExplorerUrls: cfg.blockExplorerUrls,
-              nativeCurrency: { name: 'Sepolia ETH', symbol: 'ETH', decimals: 18 },
-            }],
-          });
-        } else {
-          setStatus(networkWarning, '네트워크를 Sepolia로 전환해주세요.', 'error');
-          networkWarning.style.display = 'block';
-          return false;
-        }
-      }
-      provider = new ethers.BrowserProvider(window.ethereum);
-      signer = await provider.getSigner();
-    }
-    networkWarning.style.display = 'none';
-    return true;
+  authSubmit.disabled = true;
+  setStatus(authStatus, '처리 중...', '');
+  try {
+    const email = usernameEmail(username);
+    const { data, error } =
+      mode === 'signin'
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({ email, password, options: { data: { username: username.toLowerCase() } } });
+    if (error) throw error;
+    session = data.session;
+    setStatus(authStatus, '', '');
+    renderSignedIn();
+  } catch (err) {
+    setStatus(authStatus, err.message || String(err), 'error');
+  } finally {
+    authSubmit.disabled = false;
   }
+});
 
-  async function loadMoments() {
-    if (!contract || !currentAddress) return;
-    momentsList.textContent = '불러오는 중...';
-    momentsList.className = 'empty';
-    try {
-      const ids = await contract.getMomentIdsByAuthor(currentAddress);
-      if (ids.length === 0) {
-        momentsList.textContent = '아직 기록된 순간이 없어요.';
-        return;
-      }
-      const moments = await Promise.all(
-        ids.map((id) =>
-          contract.getMoment(id).then(([author, timestamp, text]) => ({ id, author, timestamp, text }))
-        )
-      );
-      momentsList.className = '';
-      momentsList.innerHTML = moments
-        .slice()
-        .reverse()
-        .map((m) => {
-          const date = new Date(Number(m.timestamp) * 1000).toLocaleString('ko-KR');
-          return `<div class="moment"><div class="moment-text">${escapeHtml(m.text)}</div><div class="moment-meta">#${m.id} · ${date}</div></div>`;
-        })
-        .join('');
-    } catch (err) {
-      momentsList.textContent = '불러오지 못했습니다: ' + (err.message || err);
-    }
+logoutBtn.addEventListener('click', async () => {
+  await supabase.auth.signOut();
+  session = null;
+  renderSignedOut();
+});
+
+recordBtn.addEventListener('click', async () => {
+  const text = momentText.value.trim();
+  if (!text || !session) return;
+  recordBtn.disabled = true;
+  setStatus(recordStatus, '기록 요청 중... (몇 초 정도 걸릴 수 있어요)', '');
+  try {
+    const res = await fetch(cfg.edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ text }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || '기록에 실패했어요.');
+    setStatus(recordStatus, '순간이 영구히 기록되었습니다.', 'success');
+    momentText.value = '';
+    updateCounter();
+    loadMoments();
+  } catch (err) {
+    setStatus(recordStatus, '실패: ' + (err.message || err), 'error');
+  } finally {
+    recordBtn.disabled = false;
+    updateCounter();
   }
+});
 
-  function escapeHtml(s) {
-    const div = document.createElement('div');
-    div.textContent = s;
-    return div.innerHTML;
-  }
-
-  connectBtn.addEventListener('click', async () => {
-    if (!window.ethereum) {
-      setStatus(networkWarning, 'MetaMask 등 이더리움 지갑 확장 프로그램이 필요합니다.', 'error');
-      networkWarning.style.display = 'block';
+async function loadMoments() {
+  if (!session) return;
+  const username = (session.user.user_metadata?.username ?? '').toLowerCase();
+  momentsList.textContent = '불러오는 중...';
+  momentsList.className = 'empty';
+  try {
+    const ids = await readContract.getMomentIdsByUserId(username);
+    if (ids.length === 0) {
+      momentsList.textContent = '아직 기록된 순간이 없어요.';
       return;
     }
-    provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
-    signer = await provider.getSigner();
-    currentAddress = await signer.getAddress();
-    accountLabel.textContent = currentAddress.slice(0, 6) + '...' + currentAddress.slice(-4);
-    connectBtn.textContent = '연결됨';
-    connectBtn.disabled = true;
+    const moments = await Promise.all(
+      ids.map((id) =>
+        readContract.getMoment(id).then(([author, userId, timestamp, text]) => ({ id, author, userId, timestamp, text }))
+      )
+    );
+    momentsList.className = '';
+    momentsList.innerHTML = moments
+      .slice()
+      .reverse()
+      .map((m) => {
+        const date = new Date(Number(m.timestamp) * 1000).toLocaleString('ko-KR');
+        return `<div class="moment"><div class="moment-text">${escapeHtml(m.text)}</div><div class="moment-meta">#${m.id} · ${date}</div></div>`;
+      })
+      .join('');
+  } catch (err) {
+    momentsList.textContent = '불러오지 못했습니다: ' + (err.message || err);
+  }
+}
 
-    const ok = await ensureNetwork();
-    if (ok && cfg.contractAddress) {
-      contract = new ethers.Contract(cfg.contractAddress, abi, signer);
-      updateCounter();
-      loadMoments();
-    }
-  });
+refreshBtn.addEventListener('click', loadMoments);
 
-  recordBtn.addEventListener('click', async () => {
-    if (!contract) return;
-    const text = momentText.value.trim();
-    if (!text) return;
-    recordBtn.disabled = true;
-    setStatus(recordStatus, '지갑에서 트랜잭션을 승인해주세요...', '');
-    try {
-      const tx = await contract.recordMoment(text);
-      setStatus(recordStatus, '블록체인에 기록 중... (' + tx.hash.slice(0, 10) + '...)', '');
-      await tx.wait();
-      setStatus(recordStatus, '순간이 영구히 기록되었습니다.', 'success');
-      momentText.value = '';
-      updateCounter();
-      loadMoments();
-    } catch (err) {
-      setStatus(recordStatus, '실패: ' + (err.shortMessage || err.message || err), 'error');
-    } finally {
-      recordBtn.disabled = false;
-      updateCounter();
-    }
-  });
-
-  refreshBtn.addEventListener('click', loadMoments);
-
-  updateCounter();
-})();
+const { data: existing } = await supabase.auth.getSession();
+if (existing.session) {
+  session = existing.session;
+  renderSignedIn();
+} else {
+  renderSignedOut();
+}
+updateCounter();
 </script>
 </body>
 </html>
