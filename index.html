@@ -78,7 +78,7 @@
   .star-node:hover { transform: scale(1.18); }
   .star-halo { animation: star-twinkle 3.2s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
   @keyframes star-twinkle { 0%, 100% { opacity: 0.22; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.15); } }
-  .constellation-path { filter: url(#line-glow); }
+  .constellation-path { filter: url(#line-glow); opacity: 0.8; }
   .star-label-id { font: 10px "Consolas", monospace; }
   .star-label-date { font: 9px "Consolas", monospace; fill: #aab2d8; }
   .star-label-text { font: 13px "Cormorant Garamond", serif; fill: #f4f6ff; }
@@ -295,7 +295,7 @@ function buildConstellationSvg(moments) {
       const child = posOf.get(String(item.m.id));
       const parent = posOf.get(item.parentKey);
       const midY = (parent.y + child.y) / 2;
-      return `<path class="constellation-path" d="M ${parent.x} ${parent.y} C ${parent.x} ${midY}, ${child.x} ${midY}, ${child.x} ${child.y}" fill="none" stroke="rgba(226,214,255,.5)" stroke-width="1" stroke-dasharray="4 6" />`;
+      return `<path class="constellation-path" d="M ${parent.x} ${parent.y} C ${parent.x} ${midY}, ${child.x} ${midY}, ${child.x} ${child.y}" fill="none" stroke="#ffe3b4" stroke-width="2" stroke-linecap="round" />`;
     })
     .join('');
 
@@ -336,7 +336,7 @@ function buildConstellationSvg(moments) {
     <svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <filter id="line-glow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="0.6" />
+          <feGaussianBlur stdDeviation="1" />
         </filter>
         <filter id="star-glow" x="-150%" y="-150%" width="400%" height="400%">
           <feGaussianBlur stdDeviation="3.2" />
